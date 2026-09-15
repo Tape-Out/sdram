@@ -1,0 +1,141 @@
+name: sdram
+version: 0.1.0
+spec: '0.1'
+kind: ip
+lang:
+- bsv
+- bh
+identity:
+  slug: sdram-tapeout-bsv
+  display_name: SDR SDRAM controller
+  summary: Controller for one x16 SDR SDRAM chip with power-up initialisation, 
+    distributed auto refresh and single-word access.
+  category: memory
+  subcategories:
+  - sdram
+  ip_family: sdram
+  integration_profile:
+  - apb4-slave
+  maturity: simulated
+contract:
+  version: 1
+  ctrl:
+    shape: flat
+    aw: 32
+    dw: 32
+params:
+  # 片子的行与列：8192 × 512 是 256Mb（Winbond W9825G6KH、Micron MT48LC16M16A2），4096 × 256 是 64Mb（Alliance AS4C4M16SA）
+  rowBits:
+    type: int
+    default: 13
+    range:
+    - 12
+    - 13
+  colBits:
+    type: int
+    default: 9
+    range:
+    - 8
+    - 9
+  # CAS 延迟写进模式寄存器，读出的数据晚这么多拍
+  cl:
+    type: int
+    default: 3
+    range:
+    - 2
+    - 3
+  # 时钟频率：各段时序按它折成拍数。CAS 延迟 2 要求不高于 100 MHz
+  mhz:
+    type: int
+    default: 100
+    range:
+    - 10
+    - 100
+emit:
+- kind: bsv
+  package: Sdram
+  module: mkSdram
+  config_type: SdramCfg
+  interface: SdramIfc
+  # 每一笔都要等片子，没有同拍答的形态
+  ctrl_slow: mem
+  slow_when: true
+  pins:
+  - name: pins
+    type: SdramPins
+- kind: verilog-flat
+  bus: apb4
+deps:
+  hwcore: ^0.1
+  amba: ^0.1
+area:
+  base:
+    per: rowBits
+    points:
+      '12': 2415.56
+      '13': 2555.84
+  params:
+    colBits:
+      points:
+        '8': 5.04
+        '9': 0.0
+    cl:
+      points:
+        '2': -152.04
+        '3': 0.0
+    mhz:
+      points:
+        '10': -15.4
+        '100': 0.0
+  margin: 0.0
+  model: points-additive
+  error:
+    bound: 0.0
+    sign: over
+    note: first measured by ran recal --init at the range ends and the default 
+      of each parameter; the margin is the worst underestimate at 1 off-grid 
+      probes
+  measured:
+  - at:
+      rowBits: 12
+      colBits: 9
+      cl: 3
+      mhz: 100
+    um2: 2415.56
+  - at:
+      rowBits: 13
+      colBits: 9
+      cl: 3
+      mhz: 100
+    um2: 2555.84
+  - at:
+      rowBits: 13
+      colBits: 8
+      cl: 3
+      mhz: 100
+    um2: 2560.88
+  - at:
+      rowBits: 13
+      colBits: 9
+      cl: 2
+      mhz: 100
+    um2: 2403.8
+  - at:
+      rowBits: 13
+      colBits: 9
+      cl: 3
+      mhz: 10
+    um2: 2540.44
+  - at:
+      rowBits: 13
+      colBits: 9
+      cl: 3
+      mhz: 55
+    um2: 2439.64
+  corner:
+    tool: ecc
+    pdk: ics55
+    freq_mhz: 100
+    measured: '2026-09-15'
+    toolchain: bsc 2026.01 · yosys 0.68+195 · ecc 0.1.0a11
+    gen_digest: sha256:5ed832aa69f82d92

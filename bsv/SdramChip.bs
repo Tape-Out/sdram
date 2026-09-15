@@ -1,0 +1,91 @@
+package SdramChip where
+
+-- 一颗 x16 的 SDR SDRAM 在控制器眼里是什么：地址怎么拆、命令怎么编、模式寄存器写什么、
+-- 各段时序是几拍。三家手册（Winbond W9825G6KH、Micron 256Mb、Alliance AS4C4M16SA）在命令
+-- 编码与模式寄存器上逐位一致，在上电停顿、自动刷新次数与几个最小间隔上不一致，一律取最严的。
+-- 行位宽与列位宽是数值类型，换一颗片子就是换一组类型参数；时序在编译期按时钟频率折成拍数。
+
+-- 地址按 bank、行、列从高到低排，deriving Bits 的打包顺序正好就是拆法
+struct Loc rb cb =
+    bank :: Bit 2
+    row  :: Bit rb
+    col  :: Bit cb
+  deriving (Bits, Eq, FShow)
+
+-- Winbond 表 1 与 Micron Truth Table 1 的八行
+data Cmd = Nop | Active | Read | Write | BurstStop | Precharge | AutoRefresh | LoadMode
+  deriving (Bits, Eq, FShow)
+
+-- {CS#, RAS#, CAS#, WE#}
+encode :: Cmd -> Bit 4
+encode Nop         = 0b0111
+encode Active      = 0b0011
+encode Read        = 0b0101
+encode Write       = 0b0100
+encode BurstStop   = 0b0110
+encode Precharge   = 0b0010
+encode AutoRefresh = 0b0001
+encode LoadMode    = 0b0000
+
+-- 模式寄存器：突发长度 1（M2:M0 = 000）、顺序（M3 = 0）、CAS 延迟放 M6:M4、标准模式，其余写 0
+modeReg :: Integer -> Bit 13
+modeReg cl =
+  if cl /= 2 && cl /= 3
+  then error ("SDRAM: CAS latency " +++ integerToString cl +++ " is not 2 or 3")
+  else fromInteger (cl * 16)
+
+-- ns 折成拍数，向上取整：最小间隔宁多一拍
+atLeast :: Integer -> Integer -> Integer
+atLeast mhz ns = (ns * mhz + 999) `div` 1000
+
+-- ns 折成拍数，向下取整：最大间隔宁少一拍
+atMost :: Integer -> Integer -> Integer
+atMost mhz ns = (ns * mhz) `div` 1000
+
+-- 上电停顿 200 µs（Winbond、Alliance；Micron 只要 100 µs）
+pauseCycles :: Integer -> Integer
+pauseCycles mhz = atLeast mhz 200000
+
+-- tRCD 21 ns（Alliance -7）
+rcdCycles :: Integer -> Integer
+rcdCycles mhz = atLeast mhz 21
+
+-- tRP 20 ns（Winbond -75、Micron -7E）
+rpCycles :: Integer -> Integer
+rpCycles mhz = atLeast mhz 20
+
+-- tRC 66 ns（Micron -7E）：两条 ACTIVE 或 AUTO REFRESH 之间
+rcCycles :: Integer -> Integer
+rcCycles mhz = atLeast mhz 66
+
+-- tMRD 与 tRSC 都是 2 tCK；tWR 在 CAS 延迟 2、3 下也都是 2 tCK
+mrdCycles :: Integer
+mrdCycles = 2
+
+wrCycles :: Integer
+wrCycles = 2
+
+-- 自动刷新 8 次（Winbond；Micron、Alliance 只要 2 次）
+initRefreshes :: Integer
+initRefreshes = 8
+
+-- 分散式刷新：64 ms 内每一行刷一遍，两次之间最多隔这么多拍
+refreshCycles :: Integer -> Integer -> Integer
+refreshCycles mhz rows = atMost mhz (64000000 `div` rows)
+
+-- 一笔访存从激活到下一次能发命令最多几拍：激活、tRCD、两条读或写、CAS 延迟或 tWR、预充电、tRP
+accessCycles :: Integer -> Integer -> Integer
+accessCycles mhz cl = rcdCycles mhz + 3 + max cl wrCycles + rpCycles mhz
+
+-- 空闲时刷新计数到这个数就先刷新，不再开始新的访存：访存做完再刷，间隔也不超过 refreshCycles。
+-- 放不下一笔访存、或者 CAS 延迟配不上时钟，都在编译期报出来
+refreshBudget :: Integer -> Integer -> Integer -> Integer
+refreshBudget mhz rows cl =
+  let gap   = refreshCycles mhz rows
+      worst = accessCycles mhz cl + rcCycles mhz
+  in  if cl == 2 && mhz > 100
+      then error "SDRAM: CAS latency 2 needs a clock period of at least 10 ns (Winbond -75), the clock is above 100 MHz"
+      else if gap <= worst
+      then error ("SDRAM: a refresh every " +++ integerToString gap +++ " cycles leaves no room for an access of "
+                  +++ integerToString worst +++ " cycles")
+      else gap - worst

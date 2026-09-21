@@ -73,7 +73,7 @@ verdict = (f"power-up order and every datasheet interval hold, the first and las
 
 TEMPLATE = r'''package Sdram@L@Tb;
 
-// 由 tb/mksdramtb.py 生成，勿手改。这一点：rowBits=@RB@ colBits=@CB@ cl=@CL@ mhz=@MHZ@
+// 由 htest/mksdramtb.py 生成，勿手改。这一点：rowBits=@RB@ colBits=@CB@ cl=@CL@ mhz=@MHZ@
 
 import Vector::*;
 import StmtFSM::*;
